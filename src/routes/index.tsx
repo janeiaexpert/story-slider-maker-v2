@@ -1435,7 +1435,6 @@ function Index() {
 
               </div>
               </div>
-              </div>
             </aside>
           </div>
         )}
