@@ -156,14 +156,30 @@ ${data.insight}
 
 Extraia o ângulo mais forte deste insight e gere o carrossel de 8 slides seguindo a estrutura. Retorne apenas o JSON.`;
 
-    const { text } = await generateText({
-      model,
-      system,
-      prompt: userPrompt,
-    });
-
-    const parsed = CarouselSchema.parse(extractJson(text));
-    return parsed;
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
+      }
+      try {
+        const { text } = await generateText({
+          model,
+          system,
+          prompt: userPrompt,
+          maxTokens: 2048,
+        });
+        const parsed = CarouselSchema.parse(extractJson(text));
+        return parsed;
+      } catch (e: unknown) {
+        lastErr = e;
+        const msg = String((e as Error)?.message || e);
+        if (msg.includes("429") || msg.includes("503") || msg.includes("rate")) {
+          continue;
+        }
+        throw e;
+      }
+    }
+    throw lastErr;
   });
 
 const CaptionInputSchema = z.object({
@@ -260,31 +276,48 @@ Variação ${Math.random().toString(36).slice(2, 6)} — não repita o estilo de
       hashtags: z.array(z.string()).min(3).max(8),
     });
 
-    const { text } = await generateText({
-      model,
-      system,
-      prompt: userPrompt,
-      temperature: 0.8,
-    });
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
+      }
+      try {
+        const { text } = await generateText({
+          model,
+          system,
+          prompt: userPrompt,
+          temperature: 0.8,
+          maxTokens: 1024,
+        });
 
-    let parsed;
-    try {
-      parsed = CaptionSchema.parse(extractJson(text));
-    } catch (parseErr) {
-      const hex = [...text.slice(0, 20)].map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).join(" ");
-      const preview = text.replace(/[\r\n]+/g, " ").slice(0, 200);
-      throw new Error(
-        `Parse error: ${parseErr instanceof Error ? parseErr.message : String(parseErr)} | HEX: ${hex} | RAW: ${preview}`
-      );
+        let parsed;
+        try {
+          parsed = CaptionSchema.parse(extractJson(text));
+        } catch (parseErr) {
+          const hex = [...text.slice(0, 20)].map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).join(" ");
+          const preview = text.replace(/[\r\n]+/g, " ").slice(0, 200);
+          throw new Error(
+            `Parse error: ${parseErr instanceof Error ? parseErr.message : String(parseErr)} | HEX: ${hex} | RAW: ${preview}`
+          );
+        }
+
+        const tags = parsed.hashtags
+          .map((t) => {
+            const clean = t.trim().replace(/\s+/g, "").replace(/^#+/, "");
+            return clean ? `#${clean}` : "";
+          })
+          .filter(Boolean)
+          .slice(0, 5);
+
+        return { caption: parsed.caption.trim(), hashtags: tags };
+      } catch (e: unknown) {
+        lastErr = e;
+        const msg = String((e as Error)?.message || e);
+        if (msg.includes("429") || msg.includes("503") || msg.includes("rate")) {
+          continue;
+        }
+        throw e;
+      }
     }
-
-    const tags = parsed.hashtags
-      .map((t) => {
-        const clean = t.trim().replace(/\s+/g, "").replace(/^#+/, "");
-        return clean ? `#${clean}` : "";
-      })
-      .filter(Boolean)
-      .slice(0, 5);
-
-    return { caption: parsed.caption.trim(), hashtags: tags };
+    throw lastErr;
   });
